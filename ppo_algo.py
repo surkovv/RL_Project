@@ -50,7 +50,7 @@ class PPOAgent:
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        env = NormalizeObservation(gym.make(self.env_name))
+        env = gym.make(self.env_name)
         env.seed(seed)
         obs_space = env.observation_space.shape[0]
         action_space = env.action_space.n
