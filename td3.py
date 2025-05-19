@@ -6,6 +6,7 @@ import torch.optim as optim
 from collections import deque
 import random
 import matplotlib.pyplot as plt
+from time import time
 
 from utils import ReplayBuffer
 
@@ -53,7 +54,8 @@ class TD3:
     def __init__(self, env_name="Pendulum-v1", episodes=100, 
                  batch_size=100, learning_rate=1e-3, 
                  hidden_dim=128, num_layers=2,
-                 gamma=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_delay=2, eval_interval=5):
+                 gamma=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_delay=2, eval_interval=5,
+                 exploration_noise_start = 0.5):
         self.env = gym.make(env_name)
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
@@ -67,6 +69,7 @@ class TD3:
         self.noise_clip = noise_clip
         self.policy_delay=policy_delay
         self.eval_interval = eval_interval
+        self.exploration_noise_start = exploration_noise_start
 
         self.actor = Actor(state_dim, action_dim, max_action, hidden_dim, num_layers).to(device)
         self.actor_target = Actor(state_dim, action_dim, max_action, hidden_dim, num_layers).to(device)
@@ -141,20 +144,21 @@ class TD3:
         self.env.reset(seed=seed)
 
         buffer = ReplayBuffer()
-        exploration_noise_start = 2
 
         returns = []
         eval_returns = []
+        episode_times = []
 
         action_dim = self.env.action_space.shape[0]
         max_action = float(self.env.action_space.high[0])
 
         for ep in range(self.episodes):
+            start_time = time()
             state, _ = self.env.reset()
             total_reward = 0
             for n_step in range(self.num_steps):
                 action = self.select_action(state)
-                exploration_noise = exploration_noise_start * (self.episodes - ep) / self.episodes
+                exploration_noise = self.exploration_noise_start * (self.episodes - ep) / self.episodes
                 action = (action + np.random.normal(0, exploration_noise, size=action_dim)).clip(-max_action, max_action)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 # print(reward)
@@ -165,12 +169,15 @@ class TD3:
 
                 if len(buffer) > self.batch_size:
                     self.train(buffer)
-                
                 if done:
                     break
 
-            print(f"Episode {ep}, Return: {total_reward:.2f}")
+            print(f"Episode {ep}, Return: {total_reward:.2f}, Epsilon: {exploration_noise}")
             returns.append(total_reward)
+
+            time_elapsed = time() - start_time
+            episode_times.append(time_elapsed)
+            print(f"Average time per episode: {np.mean(episode_times)}")
 
             if ep % self.eval_interval == self.eval_interval - 1:
                 state, _ = self.env.reset()
@@ -189,6 +196,7 @@ class TD3:
 
         # Plot
         plt.plot(returns)
+        plt.plot(list(range(0, len(returns), len(returns)//len(eval_returns))), eval_returns)
         plt.title("TD3 Training on Pendulum-v1")
         plt.xlabel("Episode")
         plt.ylabel("Total Reward")
