@@ -7,7 +7,7 @@ import random
 import matplotlib.pyplot as plt
 import gymnasium as gym
 
-device = "cuda"
+device = "cpu"
 
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim, num_layers):
@@ -28,7 +28,11 @@ class QNetwork(nn.Module):
     
 
 class DQNAgent:
-    def __init__(self, env_name="CartPole-v1", hidden_dim=128, episodes=600, batch_size=64, num_steps=200, num_layers=2, learning_rate=1e-3, eval_interval=5):
+    def __init__(self, env_name="CartPole-v1", 
+            hidden_dim=128, episodes=600, 
+            batch_size=64, num_steps=200, num_layers=2, 
+            learning_rate=1e-3, eval_interval=5, epsilon=1.0,
+            epsilon_min=0.05, epsilon_decay=0.99):
         self.env = gym.make(env_name)
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.n
@@ -45,20 +49,22 @@ class DQNAgent:
         self.criteria = nn.MSELoss()
         self.action_dim = action_dim
         self.gamma = 0.99
-        self.tau = 0.005
-        self.epsilon = 1.0
-        self.epsilon_min = 0.05
-        self.epsilon_decay = 0.995
+        self.tau = 0.05
+
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
         self.eval_interval = eval_interval
 
     def select_action(self, state, eps_greedy=True):
         if eps_greedy and random.random() < self.epsilon:
             return random.randint(0, self.action_dim - 1)
         else:
-            state = torch.FloatTensor(state).unsqueeze(0).to(device)
-            return self.q_network(state).argmax().item()
+            with torch.no_grad():
+                state = torch.FloatTensor(state).unsqueeze(0).to(device)
+                return self.q_network(state).argmax().item()
 
-    def train(self, buffer, batch_size):
+    def train(self, buffer, batch_size, do_soft_update):
         states, actions, rewards, next_states, dones = buffer.sample(batch_size)
 
         states = torch.FloatTensor(states).to(device)
@@ -77,8 +83,9 @@ class DQNAgent:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-        self.soft_update()
+        
+        if do_soft_update:
+            self.soft_update()
 
     def soft_update(self):
         for param, target_param in zip(self.q_network.parameters(), self.target_network.parameters()):
@@ -101,7 +108,7 @@ class DQNAgent:
             state, _ = self.env.reset()
             total_reward = 0
 
-            for _ in range(self.num_steps):
+            for step in range(self.num_steps):
                 action = self.select_action(state)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 done = terminated or truncated
@@ -110,7 +117,7 @@ class DQNAgent:
                 total_reward += reward
 
                 if len(buffer) > self.batch_size:
-                    self.train(buffer, self.batch_size)
+                    self.train(buffer, self.batch_size, step)
 
                 if done:
                     break

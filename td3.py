@@ -51,7 +51,7 @@ class Critic(nn.Module):
 
 class TD3:
     def __init__(self, env_name="Pendulum-v1", episodes=100, 
-                 num_steps=200, batch_size=100, learning_rate=1e-3, 
+                 batch_size=100, learning_rate=1e-3, 
                  hidden_dim=128, num_layers=2,
                  gamma=0.99, tau=0.005, policy_noise=0.2, noise_clip=0.5, policy_delay=2, eval_interval=5):
         self.env = gym.make(env_name)
@@ -60,13 +60,13 @@ class TD3:
         max_action = float(self.env.action_space.high[0])
         self.episodes = episodes
         self.batch_size = batch_size
-        self.num_steps = num_steps
+        self.num_steps = self.env.spec.max_episode_steps
         self.gamma = gamma
         self.tau = tau
         self.policy_noise=policy_noise
         self.noise_clip = noise_clip
         self.policy_delay=policy_delay
-        self.eval_interval = 5
+        self.eval_interval = eval_interval
 
         self.actor = Actor(state_dim, action_dim, max_action, hidden_dim, num_layers).to(device)
         self.actor_target = Actor(state_dim, action_dim, max_action, hidden_dim, num_layers).to(device)
@@ -141,7 +141,7 @@ class TD3:
         self.env.reset(seed=seed)
 
         buffer = ReplayBuffer()
-        exploration_noise_start = 0.3
+        exploration_noise_start = 2
 
         returns = []
         eval_returns = []
@@ -154,9 +154,10 @@ class TD3:
             total_reward = 0
             for n_step in range(self.num_steps):
                 action = self.select_action(state)
-                exploration_noise = exploration_noise_start * (self.num_steps - n_step) / self.num_steps
+                exploration_noise = exploration_noise_start * (self.episodes - ep) / self.episodes
                 action = (action + np.random.normal(0, exploration_noise, size=action_dim)).clip(-max_action, max_action)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
+                # print(reward)
                 done = terminated or truncated
                 buffer.push(state, action, reward, next_state, done)
                 state = next_state
@@ -164,6 +165,9 @@ class TD3:
 
                 if len(buffer) > self.batch_size:
                     self.train(buffer)
+                
+                if done:
+                    break
 
             print(f"Episode {ep}, Return: {total_reward:.2f}")
             returns.append(total_reward)
