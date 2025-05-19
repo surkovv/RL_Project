@@ -145,13 +145,14 @@ class TD3:
 
         buffer = ReplayBuffer()
 
-        returns = []
-        eval_returns = []
-        episode_times = []
+        returns = {}
+        eval_returns = {}
+        episode_times = {}
 
         action_dim = self.env.action_space.shape[0]
         max_action = float(self.env.action_space.high[0])
 
+        step_counter = 0
         for ep in range(self.episodes):
             start_time = time()
             state, _ = self.env.reset()
@@ -169,34 +170,42 @@ class TD3:
 
                 if len(buffer) > self.batch_size:
                     self.train(buffer)
+                step_counter += 1
                 if done:
                     break
 
+
             print(f"Episode {ep}, Return: {total_reward:.2f}, Epsilon: {exploration_noise}")
-            returns.append(total_reward)
+            returns[step_counter] = total_reward
 
             time_elapsed = time() - start_time
-            episode_times.append(time_elapsed)
-            print(f"Average time per episode: {np.mean(episode_times)}")
+            episode_times[step_counter] = time_elapsed
+            print(f"Average time per episode: {np.mean(list(episode_times.values())):.3f}")
+            
 
             if ep % self.eval_interval == self.eval_interval - 1:
-                state, _ = self.env.reset()
                 total_reward = 0
-                for n_step in range(self.num_steps):
-                    action = self.select_action(state)
-                    next_state, reward, terminated, truncated, _ = self.env.step(action)
-                    done = terminated or truncated
-                    state = next_state
-                    total_reward += reward
-                    if done:
-                        break
+                
+                n_eval = 5
 
+                for _ in range(n_eval):
+                    state, _ = self.env.reset()
+                    for n_step in range(self.num_steps):
+                        action = self.select_action(state)
+                        next_state, reward, terminated, truncated, _ = self.env.step(action)
+                        done = terminated or truncated
+                        state = next_state
+                        total_reward += reward
+                        if done:
+                            break
+
+                total_reward /= n_eval
                 print(f"Episode {ep}, Eval return: {total_reward:.2f}")
-                eval_returns.append(total_reward)
+                eval_returns[step_counter] = total_reward
 
         # Plot
-        plt.plot(returns)
-        plt.plot(list(range(0, len(returns), len(returns)//len(eval_returns))), eval_returns)
+        plt.plot(returns.keys(), returns.values())
+        plt.plot(eval_returns.keys(), eval_returns.values())
         plt.title("TD3 Training on Pendulum-v1")
         plt.xlabel("Episode")
         plt.ylabel("Total Reward")
