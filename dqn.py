@@ -5,16 +5,22 @@ import torch.optim as optim
 from utils import ReplayBuffer
 import random
 import matplotlib.pyplot as plt
+import gymnasium as gym
 
 device = "cuda"
 
 class QNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, hidden_dim, num_layers):
         super(QNetwork, self).__init__()
+        layer_list = [
+            nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+        ]
+        for _ in range(num_layers - 2):
+            layer_list.append(nn.Linear(hidden_dim, hidden_dim))
+            layer_list.append(nn.ReLU())
+        layer_list.append(nn.Linear(hidden_dim, action_dim))
         self.model = nn.Sequential(
-            nn.Linear(state_dim, 128), nn.ReLU(),
-            nn.Linear(128, 128), nn.ReLU(),
-            nn.Linear(128, action_dim)
+            *layer_list
         )
 
     def forward(self, x):
@@ -22,12 +28,20 @@ class QNetwork(nn.Module):
     
 
 class DQNAgent:
-    def __init__(self, state_dim, action_dim):
-        self.q_network = QNetwork(state_dim, action_dim).to(device)
-        self.target_network = QNetwork(state_dim, action_dim).to(device)
+    def __init__(self, env_name="CartPole-v1", hidden_dim=128, episodes=600, batch_size=64, num_steps=200, num_layers=2, learning_rate=1e-3, eval_interval=5):
+        self.env = gym.make(env_name)
+        state_dim = self.env.observation_space.shape[0]
+        action_dim = self.env.action_space.n
+        
+        self.episodes = episodes
+        self.batch_size = batch_size
+        self.num_steps = num_steps
+
+        self.q_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
+        self.target_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
 
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=1e-3)
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         self.criteria = nn.MSELoss()
         self.action_dim = action_dim
         self.gamma = 0.99
@@ -72,37 +86,44 @@ class DQNAgent:
     def update_epsilon(self):
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
+    def train_with_seed(self, seed):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        self.env.reset(seed=seed)
 
-def train_agent_dqn(agent, env, episodes, batch_size, num_steps):
-    buffer = ReplayBuffer()
-    rewards_history = []
+        buffer = ReplayBuffer()
+        rewards_history = []
+        eval_rewards_history = []
 
-    for ep in range(episodes):
-        state, _ = env.reset()
-        total_reward = 0
+        for ep in range(self.episodes):
+            state, _ = self.env.reset()
+            total_reward = 0
 
-        for _ in range(num_steps):
-            action = agent.select_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-            buffer.push(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
+            for _ in range(self.num_steps):
+                action = self.select_action(state)
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
+                done = terminated or truncated
+                buffer.push(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
 
-            if len(buffer) > batch_size:
-                agent.train(buffer, batch_size)
+                if len(buffer) > self.batch_size:
+                    self.train(buffer, self.batch_size)
 
-            if done:
-                break
+                if done:
+                    break
 
-        agent.update_epsilon()
-        rewards_history.append(total_reward)
-        print(f"Episode {ep}, Reward: {total_reward:.1f}, Epsilon: {agent.epsilon:.2f}")
+            self.update_epsilon()
+            rewards_history.append(total_reward)
+            print(f"Episode {ep}, Reward: {total_reward:.1f}, Epsilon: {self.epsilon:.2f}")
 
-    # Plotting
-    plt.plot(rewards_history)
-    plt.xlabel("Episode")
-    plt.ylabel("Reward")
-    plt.title("DQN on CartPole-v1")
-    plt.grid()
-    plt.show()
+        # Plotting
+        plt.plot(rewards_history)
+        plt.xlabel("Episode")
+        plt.ylabel("Reward")
+        plt.title("DQN on CartPole-v1")
+        plt.grid()
+        plt.show()
+
+        return rewards_history
