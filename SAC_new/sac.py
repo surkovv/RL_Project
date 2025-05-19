@@ -8,7 +8,7 @@ import random
 import matplotlib.pyplot as plt
 from torch.distributions.normal import Normal
 import torch.nn.functional as F
-
+import time
 from utils import ReplayBuffer
 
 device = "cpu"
@@ -35,9 +35,12 @@ class Actor(nn.Module):
 
         return mean, variance 
     
-    def sample_normal(self, state, reparametrize = True):
+    def sample_normal(self, state, reparametrize = True, greedy = False):
         mu, sigma = self.forward(state)
         probabilities = Normal(mu, sigma)
+
+        if greedy:
+            actions = mu # greedy action we only take mu
 
         if reparametrize:
             # in this case this is the same as doing: a = mu + sigma*eps where epsilon is gaussian with zero mean and unity variance.
@@ -80,26 +83,41 @@ class Value(nn.Module):
 
 
 class SAC:
-    def __init__(self, state_dim, 
-                 action_dim, 
+    def __init__(self, env, 
+                 env_name,
+                 state_dim, 
+                 action_dim,
+                 episodes = 100, 
+                 num_steps = 512,
                  scale = 2,
                  tau = 0.005,
                  max_actions = None,
-                 exploration_noise = 0.3):
+                 alpha = 0.3,
+                 batch_size = 128,
+                 eval_interval = 5):
         self.actor = Actor(state_dim=state_dim, action_dim=action_dim, max_actions = max_actions)
         self.critic1 = Critic(state_dim=state_dim, action_dim=action_dim)
         self.critic2 = Critic(state_dim=state_dim, action_dim=action_dim)
         self.value = Value(state_dim=state_dim)
         self.target_value = Value(state_dim=state_dim)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=3e-4)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=3e-4)
-        self.value_optimizer = optim.Adam(self.value.parameters(), lr=3e-4)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=1e-3)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=1e-3)
+        self.value_optimizer = optim.Adam(self.value.parameters(), lr=1e-3)
 
         self.total_it = 0 
         self.scale = scale
-        self.exploration_noise = exploration_noise
+        self.alpha = alpha
+
+        # Training Hyperparameters:
+
+        self.batch_size = batch_size
+        self.eval_interval = eval_interval
+        self.env = env
+        self.env_name = env_name
+        self.episodes = episodes
+        self.num_steps = num_steps
 
         self.update_network_parameters(tau=tau)
 
@@ -123,9 +141,9 @@ class SAC:
             value_state_dict[name] = tau*value_state_dict[name].clone() + (1-tau)*target_value_state_dict[name].clone()
         self.target_value.load_state_dict(value_state_dict)
     
-    def select_action(self, state):
+    def select_action(self, state, greedy = False):
         state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        actions, _ = self.actor.sample_normal(state, reparametrize=True)
+        actions, _ = self.actor.sample_normal(state, reparametrize=True, greedy = greedy)
         return actions.cpu().data.numpy().flatten()
     
     def train(self, buffer, batch_size = 128, gamma = 0.99):
@@ -165,7 +183,7 @@ class SAC:
         critic_min = torch.min(Q1_new, Q2_new)
 
         # actor_loss = F.mse_loss(log_probs, critic_min.view(-1))
-        actor_loss = (log_probs - critic_min.view(-1)).mean()
+        actor_loss = (self.alpha*log_probs - critic_min.view(-1)).mean()
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -189,43 +207,117 @@ class SAC:
         self.critic2_optimizer.step()
 
         self.update_network_parameters()
+    
+    def train_with_seed(self, seed):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
+        self.env.reset(seed=seed)
 
-def train_agent_sac(agent, env,env_name,episodes, batch_size, num_steps):
-    buffer = ReplayBuffer()
-    returns = []
+        buffer = ReplayBuffer()
+        exploration_noise_start = 2
 
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
-    max_action = float(env.action_space.high[0])
+        returns = {}
+        eval_returns = {}
+        episode_times = {}
 
-    exploration_noise_start = agent.exploration_noise
+        action_dim = self.env.action_space.shape[0]
+        max_action = float(self.env.action_space.high[0])
 
-    for ep in range(episodes):
-        state, _ = env.reset()
-        total_reward = 0
-        for n_step in range(num_steps):
-            exploration_noise = exploration_noise_start * (1 - ep / episodes)
-            action = agent.select_action(state)
-            noise = np.random.normal(0, exploration_noise, size=action_dim)
-            action = (action + noise).clip(-max_action, max_action)
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-            buffer.push(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
 
-            if len(buffer) > 10000:
-                agent.train(buffer, batch_size=batch_size)
+        step_counter = 0
+        for ep in range(self.episodes):
+            state, _ = self.env.reset()
+            start_time = time.time()
+            total_reward = 0
+            for n_step in range(self.num_steps):
+                action = self.select_action(state)
+                exploration_noise = exploration_noise_start * (self.episodes - ep) / self.episodes
+                # action = (action + np.random.normal(0, exploration_noise, size=action_dim)).clip(-max_action, max_action)
+                next_state, reward, terminated, truncated, _ = self.env.step(action)
+                # print(reward)
+                done = terminated or truncated
+                buffer.push(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
 
-        returns.append(total_reward)
-        print(f"Episode {ep}, Return: {total_reward:.2f}")
+                if len(buffer) > self.batch_size:
+                    self.train(buffer)
+                
+                if done:
+                    break
 
-    # Plot
-    plt.plot(returns)
-    plt.title("SAC Training on "+env_name)
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.grid()
-    plt.show()
+            print(f"Episode {ep}, Return: {total_reward:.2f}, average time: {np.mean(np.array(list(episode_times.values()))):.2f}")
+            step_counter += 1 
+            end_time = time.time() - start_time
+            episode_times[step_counter] = end_time
+            returns[step_counter] = total_reward
+
+            n_eval = 5
+
+            if ep % self.eval_interval == self.eval_interval - 1:
+                total_reward = 0
+                for _ in range(n_eval):
+                    state, _ = self.env.reset()
+                    for n_step in range(self.num_steps):
+                        action = self.select_action(state, greedy = True)
+                        next_state, reward, terminated, truncated, _ = self.env.step(action)
+                        done = terminated or truncated
+                        state = next_state
+                        total_reward += reward
+                        if done:
+                            break
+                total_reward = total_reward / n_eval
+                print(f"Episode {ep}, Eval return: {total_reward:.2f}")
+                eval_returns[step_counter] = total_reward
+
+        # Plot
+        plt.plot(returns.keys(), returns.values())
+        plt.plot(eval_returns.keys(), eval_returns.values())
+        plt.title("SAC Training on "+self.env_name)
+        plt.xlabel("Episode")
+        plt.ylabel("Total Reward")
+        plt.grid()
+        plt.show()
+
+        return returns, eval_returns
+
+# def train_agent_sac(agent, env,env_name,episodes, batch_size, num_steps):
+#     buffer = ReplayBuffer()
+#     returns = []
+
+#     state_dim = env.observation_space.shape[0]
+#     action_dim = env.action_space.shape[0]
+#     max_action = float(env.action_space.high[0])
+
+#     exploration_noise_start = agent.exploration_noise
+
+#     for ep in range(episodes):
+#         state, _ = env.reset()
+#         total_reward = 0
+#         for n_step in range(num_steps):
+#             exploration_noise = exploration_noise_start * (1 - ep / episodes)
+#             action = agent.select_action(state)
+#             # noise = np.random.normal(0, exploration_noise, size=action_dim)
+#             # action = (action + noise).clip(-max_action, max_action)
+#             next_state, reward, terminated, truncated, _ = env.step(action)
+#             done = terminated or truncated
+#             buffer.push(state, action, reward, next_state, done)
+#             state = next_state
+#             total_reward += reward
+
+#             if len(buffer) > 1000:
+#                 agent.train(buffer, batch_size=batch_size)
+
+#         returns.append(total_reward)
+#         print(f"Episode {ep}, Return: {total_reward:.2f}")
+
+#     # Plot
+#     plt.plot(returns)
+#     plt.title("SAC Training on "+env_name)
+#     plt.xlabel("Episode")
+#     plt.ylabel("Total Reward")
+#     plt.grid()
+#     plt.show()
 
 
