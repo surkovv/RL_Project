@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from ppo_algo_continuous import PPOContinuousAgent
 
 if __name__ == '__main__':
-    seeds = [0, 23, 1337]
+    seeds = [42, 0, 345]
     all_eval_histories = []
     all_train_histories = []
 
