@@ -49,9 +49,10 @@ class DQNAgent:
         self.epsilon = 1.0
         self.epsilon_min = 0.05
         self.epsilon_decay = 0.995
+        self.eval_interval = eval_interval
 
-    def select_action(self, state):
-        if random.random() < self.epsilon:
+    def select_action(self, state, eps_greedy=True):
+        if eps_greedy and random.random() < self.epsilon:
             return random.randint(0, self.action_dim - 1)
         else:
             state = torch.FloatTensor(state).unsqueeze(0).to(device)
@@ -118,6 +119,21 @@ class DQNAgent:
             rewards_history.append(total_reward)
             print(f"Episode {ep}, Reward: {total_reward:.1f}, Epsilon: {self.epsilon:.2f}")
 
+            if ep % self.eval_interval == self.eval_interval - 1:
+                state, _ = self.env.reset()
+                total_reward = 0
+                for n_step in range(self.num_steps):
+                    action = self.select_action(state, eps_greedy=False)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+                    done = terminated or truncated
+                    state = next_state
+                    total_reward += reward
+                    if done:
+                        break
+
+                print(f"Episode {ep}, Eval return: {total_reward:.2f}")
+                eval_rewards_history.append(total_reward)
+
         # Plotting
         plt.plot(rewards_history)
         plt.xlabel("Episode")
@@ -126,4 +142,4 @@ class DQNAgent:
         plt.grid()
         plt.show()
 
-        return rewards_history
+        return rewards_history, eval_rewards_history

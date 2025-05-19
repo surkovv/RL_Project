@@ -175,9 +175,10 @@ class TD3:
                     action = self.select_action(state)
                     next_state, reward, terminated, truncated, _ = self.env.step(action)
                     done = terminated or truncated
-                    buffer.push(state, action, reward, next_state, done)
                     state = next_state
                     total_reward += reward
+                    if done:
+                        break
 
                 print(f"Episode {ep}, Eval return: {total_reward:.2f}")
                 eval_returns.append(total_reward)
