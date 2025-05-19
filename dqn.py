@@ -32,8 +32,9 @@ class DQNAgent:
             hidden_dim=128, episodes=600, 
             batch_size=64, num_steps=200, num_layers=2, 
             learning_rate=1e-3, eval_interval=5, epsilon=1.0,
-            tau = 0.05, gamma = 0.99,
-            epsilon_min=0.05, epsilon_decay=0.99):
+            tau = 0.05, gamma = 0.99, epsilon_min=0.05,
+            epsilon_decay=0.99, eval_best_policy=True):
+
         self.env = gym.make(env_name)
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.n
@@ -46,7 +47,8 @@ class DQNAgent:
         self.target_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
 
-        self.best_policy = self.q_network
+        self.best_reward_mean = -np.inf
+        self.best_reward_std = 0
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         self.criteria = nn.MSELoss()
@@ -132,6 +134,14 @@ class DQNAgent:
             if ep % self.eval_interval == self.eval_interval - 1:
                 eval_rewards = self.evaluate_policy(num_episodes=5)
                 eval_rewards_history.append(np.mean(eval_rewards))
+                average_rewards = np.mean(eval_rewards_history)
+                if average_rewards >= self.best_reward_mean:
+                    better_evaluation_reward = self.evaluate_policy(num_episodes=20)
+                    mean = np.mean(better_evaluation_reward)
+                    if mean >= self.best_reward_mean:
+                        self.best_reward_mean = mean
+                        self.best_reward_std = np.std(better_evaluation_reward)
+
                 # print(f"Episode {ep}, Eval return: {total_reward:.2f}")
 
         # # Plotting
@@ -160,7 +170,7 @@ class DQNAgent:
                 done = terminated or truncated
                 state = next_state
 
-            print(f"Episode {ep}, Eval return: {total_reward:.2f}")
+            # print(f"Episode {ep}, Eval return: {total_reward:.2f}")
 
             rewards.append(total_reward)
 
