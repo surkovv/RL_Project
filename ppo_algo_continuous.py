@@ -223,3 +223,4 @@ class PPOContinuousAgent:
         print(f"Training finished in {time.time() - start_time:.2f} seconds. Final model saved to {final_model_path}")
 
         self.env.close()
+        return eval_score_history, score_history
