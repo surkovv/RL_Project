@@ -63,7 +63,7 @@ class PPOContinuousAgent:
         self.save_interval = save_interval
         self.seed = random_seed
 
-        self.env = NormalizeObservation(gym.make(env_name))
+        self.env = gym.make(env_name)
         if random_seed is not None:
             torch.manual_seed(random_seed)
             np.random.seed(random_seed)
