@@ -46,6 +46,8 @@ class DQNAgent:
         self.target_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
         self.target_network.load_state_dict(self.q_network.state_dict())
 
+        self.best_policy = self.q_network
+
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         self.criteria = nn.MSELoss()
         self.action_dim = action_dim
@@ -128,19 +130,7 @@ class DQNAgent:
             # print(f"Episode {ep}, Reward: {total_reward:.1f}, Epsilon: {self.epsilon:.2f}")
 
             if ep % self.eval_interval == self.eval_interval - 1:
-                eval_rewards = []
-                for _ in range(5):
-                    state, _ = self.env.reset()
-                    total_reward = 0
-                    for n_step in range(self.num_steps):
-                        action = self.select_action(state, deterministic=True)
-                        next_state, reward, terminated, truncated, _ = self.env.step(action)
-                        done = terminated or truncated
-                        state = next_state
-                        total_reward += reward
-                        if done:
-                            break
-                    eval_rewards.append(total_reward)
+                eval_rewards = self.evaluate_policy(num_episodes=5)
                 eval_rewards_history.append(np.mean(eval_rewards))
                 # print(f"Episode {ep}, Eval return: {total_reward:.2f}")
 
@@ -174,7 +164,4 @@ class DQNAgent:
 
             rewards.append(total_reward)
 
-        mean_reward = np.mean(rewards)
-        std_reward = np.std(rewards)
-
-        return mean_reward, std_reward
+        return rewards
