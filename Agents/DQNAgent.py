@@ -116,7 +116,7 @@ class DQNAgent:
 
             rewards_history.append(total_reward)
 
-            if self.tau == 1:
+            if self.tau == 1.0:
                 if episode % self.target_update_freq == 0:
                     self.update_target()
             else:
@@ -127,16 +127,16 @@ class DQNAgent:
             if episode % self.eval_interval == self.eval_interval - 1:
                 state, _ = self.env.reset()
                 total_reward = 0
+                done = False
                 while not done:
                     action = self.act(state, eps_greedy=False)
                     next_state, reward, terminated, truncated, _ = self.env.step(action)
                     done = terminated or truncated
 
-                    self.memory.push(state, action, reward, next_state, done)
                     state = next_state
                     total_reward += reward
 
-
+                # print(f"Episode {episode}, Total reward: {total_reward}, Epsilon: {self.epsilon:.3f}")
                 eval_rewards_history.append(total_reward)
 
 
