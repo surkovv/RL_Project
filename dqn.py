@@ -6,6 +6,7 @@ from utils import ReplayBuffer
 import random
 import matplotlib.pyplot as plt
 import gymnasium as gym
+from time import time
 
 device = "cpu"
 
@@ -32,8 +33,7 @@ class DQNAgent:
             hidden_dim=128, episodes=600, 
             batch_size=64, num_steps=200, num_layers=2, 
             learning_rate=1e-3, eval_interval=5, epsilon=1.0,
-            tau = 0.05, gamma = 0.99, epsilon_min=0.05,
-            epsilon_decay=0.99, eval_best_policy=True):
+            tau = 0.05, gamma = 0.99, epsilon_min=0.05, epsilon_decay=0.99):
 
         self.env = gym.make(env_name)
         state_dim = self.env.observation_space.shape[0]
@@ -106,10 +106,13 @@ class DQNAgent:
         self.env.reset(seed=seed)
 
         buffer = ReplayBuffer()
-        rewards_history = []
-        eval_rewards_history = []
+        rewards_history = {}
+        eval_rewards_history = {}
+        episode_times = {}
 
+        step_counter = 0
         for ep in range(self.episodes):
+            start_time = time()
             state, _ = self.env.reset()
             total_reward = 0
 
@@ -120,21 +123,22 @@ class DQNAgent:
                 buffer.push(state, action, reward, next_state, done)
                 state = next_state
                 total_reward += reward
-
+                step_counter += 1
                 if len(buffer) > self.batch_size:
                     self.train(buffer, self.batch_size, step)
 
-                if done:
-                    break
 
             self.update_epsilon()
-            rewards_history.append(total_reward)
-            # print(f"Episode {ep}, Reward: {total_reward:.1f}, Epsilon: {self.epsilon:.2f}")
+            rewards_history[step_counter] = total_reward
+            time_elapsed = time() - start_time
+            episode_times[step_counter] = time_elapsed
+            # print(f"Average time per episode: {np.mean(list(episode_times.values())):.3f}")
+
 
             if ep % self.eval_interval == self.eval_interval - 1:
                 eval_rewards = self.evaluate_policy(num_episodes=5)
-                eval_rewards_history.append(np.mean(eval_rewards))
-                average_rewards = np.mean(eval_rewards_history)
+                average_rewards = np.mean(eval_rewards)
+                eval_rewards_history[step_counter] = average_rewards
                 if average_rewards >= self.best_reward_mean:
                     better_evaluation_reward = self.evaluate_policy(num_episodes=20)
                     mean = np.mean(better_evaluation_reward)
