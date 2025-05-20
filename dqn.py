@@ -127,6 +127,9 @@ class DQNAgent:
                 if len(buffer) > self.batch_size:
                     self.train(buffer, self.batch_size, step)
 
+                if done:
+                    break
+
 
             self.update_epsilon()
             rewards_history[step_counter] = total_reward
