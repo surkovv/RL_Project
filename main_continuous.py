@@ -1,24 +1,37 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from ppo_algo_continuous import PPOContinuousAgent
+import time
 
 if __name__ == '__main__':
     seeds = [42, 0, 345]
     all_eval_histories = []
     all_train_histories = []
+    start_time = time.time()
+    name = 'MoutainCarContinuous-v0'
+    best_means = []
+    best_stds = []
 
     for seed in seeds:
         agent = PPOContinuousAgent(random_seed=seed)
-        eval_scores, train_scores = agent.train()
+        eval_scores, train_scores, best_mean, best_std = agent.train()
         all_eval_histories.append(eval_scores)
         all_train_histories.append(train_scores)
+        best_means.append(best_mean)
+        best_stds.append(best_std)
+
+        np.save(f'ppo_eval_seed{seed}_{name}.npy', np.array(eval_scores))
+    print("Best mean reward: ", best_means)
+    print("Best std reward: ", best_stds)
+    total_time = time.time() - start_time
+    print("Total time taken: ", total_time)
 
     min_eval_len = min(len(s) for s in all_eval_histories)
-    all_eval_histories = [s[:min_eval_len] for s in all_eval_histories]
-    eval_array = np.array(all_eval_histories)
+    eval_array = np.array([list(s.values())[:min_eval_len] for s in all_eval_histories])
+    step_array = np.array([list(s.keys())[:min_eval_len] for s in all_eval_histories])
     mean_eval = np.mean(eval_array, axis=0)
     std_eval = np.std(eval_array, axis=0)
-    eval_x = np.arange(1, min_eval_len + 1) * agent.eval_interval
+    eval_x = np.mean(step_array, axis=0) 
 
     plt.figure(figsize=(10, 6))
     plt.plot(eval_x, mean_eval, label='Mean Eval Reward', color='blue')

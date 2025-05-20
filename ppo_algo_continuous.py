@@ -43,7 +43,7 @@ class ActorCritic(nn.Module):
 
 class PPOContinuousAgent:
     def __init__(self, env_name="MountainCarContinuous-v0", hidden_size=64, learning_rate=1e-4, gamma=0.99,
-                 lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.5, train_iters=300,
+                 lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.5, train_iters=500,
                  steps_per_iter=4096, mini_batch_size=256, ppo_epochs=5, eval_interval=10, save_interval=50,
                  random_seed=42):
 
@@ -62,8 +62,7 @@ class PPOContinuousAgent:
         self.eval_interval = eval_interval
         self.save_interval = save_interval
         self.seed = random_seed
-
-        self.env = gym.make(env_name)
+        self.env = NormalizeObservation(gym.make(env_name))
         if random_seed is not None:
             torch.manual_seed(random_seed)
             np.random.seed(random_seed)
@@ -77,14 +76,15 @@ class PPOContinuousAgent:
 
     def train(self):
         score_history = []
-        eval_score_history = []
+        eval_score_history = {}
         global_step = 0
         episode_count = 0
-        best_eval_reward = -float("inf")
+        best_reward_mean = -float("inf")
+        best_reward_std = 0.0
         start_time = time.time()
 
         for i in range(self.train_iters):
-            if i > 200:
+            if i > 20:
                 self.entropy_coef = 0.0
                 self.lr = 1e-5
                 for param_group in self.optimizer.param_groups:
@@ -206,10 +206,31 @@ class PPOContinuousAgent:
                         total_reward += r
                     eval_rewards.append(total_reward)
                 eval_reward = float(np.mean(eval_rewards))
-                eval_score_history.append(eval_reward)
+                eval_score_history[global_step] = eval_reward
                 log_msg += f", Eval Avg Reward: {eval_reward:.2f}"
-                if eval_reward > best_eval_reward:
-                    best_eval_reward = eval_reward
+                if eval_reward > best_reward_mean:
+                    reevaluated = []
+                    for _ in range(20):
+                        s = self.env.reset()
+                        s = np.asarray(s, dtype=np.float32)
+                        done = False
+                        total_reward = 0.0
+                        while not done:
+                            s_tensor = torch.from_numpy(s).float().unsqueeze(0)
+                            with torch.no_grad():
+                                mean, _, _ = self.model(s_tensor)
+                                a = mean  
+                            s, r, done, _ = self.env.step(a.cpu().numpy().flatten())
+                            s = np.asarray(s, dtype=np.float32)
+                            total_reward += r
+                        reevaluated.append(total_reward)
+
+                    mean = np.mean(reevaluated)
+                    std = np.std(reevaluated)
+
+                    if mean >= best_reward_mean:
+                        best_reward_mean = mean
+                        best_reward_std = std
 
             print(log_msg)
 
@@ -223,4 +244,4 @@ class PPOContinuousAgent:
         print(f"Training finished in {time.time() - start_time:.2f} seconds. Final model saved to {final_model_path}")
 
         self.env.close()
-        return eval_score_history, score_history
+        return eval_score_history, score_history, best_reward_mean, best_reward_std
