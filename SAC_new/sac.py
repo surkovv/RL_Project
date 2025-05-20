@@ -17,10 +17,11 @@ class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_actions = None):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Linear(state_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU())
-        self.mean = nn.Linear(256,action_dim)
-        self.variance = nn.Sequential(nn.Linear(256,action_dim), nn.Sigmoid())
+            nn.Linear(state_dim, 64), nn.ReLU(),
+            nn.Linear(64, 64), nn.ReLU())
+        self.mean = nn.Linear(64,action_dim)
+        # self.variance = nn.Sequential(nn.Linear(64,action_dim), nn.Sigmoid())
+        self.variance = nn.Sequential(nn.Linear(64,action_dim))
         # self.log_variance = nn.Parameter(torch.ones(action_dim) * 0.2)
         self.max_action = max_actions
         self.reparam_noise = 1e-6
@@ -37,8 +38,9 @@ class Actor(nn.Module):
 
         return mean, variance 
     
-    def sample_normal(self, state, reparametrize = True, greedy = False):
+    def sample_normal(self, state, reparametrize = True, greedy = False, alpha = None):
         mu, sigma = self.forward(state)
+        sigma = (1+alpha)*sigma 
         probabilities = Normal(mu, sigma)
 
         if greedy:
@@ -63,9 +65,9 @@ class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, 1)
+            nn.Linear(state_dim + action_dim, 64), nn.ReLU(),
+            nn.Linear(64, 64), nn.ReLU(),
+            nn.Linear(64, 1)
         )
 
     def forward(self, state, action):
@@ -75,9 +77,9 @@ class Value(nn.Module):
     def __init__(self, state_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(state_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, 1)
+            nn.Linear(state_dim, 64), nn.ReLU(),
+            nn.Linear(64, 64), nn.ReLU(),
+            nn.Linear(64, 1)
         )
 
     def forward(self, state):
@@ -96,7 +98,8 @@ class SAC:
                  max_actions = None,
                  alpha = 0.3,
                  batch_size = 128,
-                 eval_interval = 5):
+                 eval_interval = 5,
+                 use_autotune = False):
         self.actor = Actor(state_dim=state_dim, action_dim=action_dim, max_actions = max_actions)
         self.critic1 = Critic(state_dim=state_dim, action_dim=action_dim)
         self.critic2 = Critic(state_dim=state_dim, action_dim=action_dim)
@@ -121,6 +124,17 @@ class SAC:
         self.episodes = episodes
         self.num_steps = num_steps
 
+        self.autotune = use_autotune
+
+        if self.autotune:
+            self.target_entropy = -0.3  # heuristic default
+            self.log_alpha = torch.tensor(np.log(self.alpha), requires_grad=True, device=device)
+            self.alpha_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
+        else:
+            self.target_entropy = None
+            self.log_alpha = None
+            self.alpha_optimizer = None
+            self.alpha = alpha
         self.update_network_parameters(tau=tau)
 
     def update_network_parameters(self, tau=0.005):
@@ -145,13 +159,13 @@ class SAC:
     
     def select_action(self, state, greedy = False):
         state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        actions, _ = self.actor.sample_normal(state, reparametrize=True, greedy = greedy)
+        actions, _ = self.actor.sample_normal(state, reparametrize=True, greedy = greedy, alpha=self.alpha)
         return actions.cpu().data.numpy().flatten()
     
     def train(self, buffer, batch_size = 128, gamma = 0.99):
         self.total_it+=1
 
-        state, action, reward, next_state, done = buffer.sample(batch_size)
+        state, action, reward, next_state, done = buffer.sample(self.batch_size)
         state = torch.FloatTensor(state).to(device)
         action = torch.FloatTensor(action).to(device)
         reward = torch.FloatTensor(reward).to(device).view(-1)
@@ -163,7 +177,7 @@ class SAC:
         target_value = self.target_value(next_state).view(-1)
         target_value = torch.where(done, torch.zeros_like(target_value), target_value)
 
-        actions, log_probs = self.actor.sample_normal(state, reparametrize=False)
+        actions, log_probs = self.actor.sample_normal(state, reparametrize=False, alpha=self.alpha)
         log_probs = log_probs.view(-1)
 
         Q1_new = self.critic1(state, actions).view(-1)
@@ -178,11 +192,24 @@ class SAC:
         self.value_optimizer.step() 
 
         # --- Actor network update ---
-        actions, log_probs = self.actor.sample_normal(state, reparametrize=True)
+        actions, log_probs = self.actor.sample_normal(state, reparametrize=True, alpha=self.alpha)
         log_probs = log_probs.view(-1)
         Q1_new = self.critic1(state, actions).view(-1)
         Q2_new = self.critic2(state, actions).view(-1)
         critic_min = torch.min(Q1_new, Q2_new)
+
+        if self.autotune:
+            # Update alpha
+            alpha_loss = -(self.log_alpha * (log_probs + self.target_entropy).detach()).mean()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            # self.alpha = self.log_alpha.exp().detach()
+
+            with torch.no_grad():
+                self.log_alpha.data = torch.clamp(self.log_alpha.data, min=-3, max=2)
+                self.alpha = self.log_alpha.exp().detach()
+
 
         # actor_loss = F.mse_loss(log_probs, critic_min.view(-1))
         actor_loss = (self.alpha*log_probs - critic_min.view(-1)).mean()
@@ -191,6 +218,9 @@ class SAC:
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+        if self.autotune and self.total_it % 500 == 0:
+            print(f"[Alpha Tuning] Training Step {self.total_it}: alpha = {self.alpha.item():.4f}")
 
         # --- Critic networks update ---
         q_hat = self.scale * reward + gamma * self.target_value(next_state).view(-1).detach()
@@ -213,7 +243,7 @@ class SAC:
     
     def train_with_seed(self, seed):
         torch.manual_seed(seed)
-        np.random.seed(seed)
+        # np.random.seed(seed)
         random.seed(seed)
         self.env.reset(seed=seed)
 
@@ -235,13 +265,15 @@ class SAC:
             start_time = time.time()
             total_reward = 0
             for n_step in range(self.num_steps):
-                action = self.select_action(state)
-                # self.alpha = exploration_noise_start * (self.episodes - ep) / (0.5*self.episodes)
+                
                 # if ep >= 15:
-                    # action = (action + np.random.normal(0, self.alpha, size=action_dim)).clip(-max_action, max_action)
-                self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
-                # else:
-                #     action = np.random.normal(0, 0.5,size=action_dim)*max_action
+                # action = (action + np.random.normal(0, 0.5, size=action_dim)).clip(-max_action, max_action)
+                # self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
+                if ep < 0:
+                    action = np.random.choice([-1, 1],size=action_dim)*max_action
+                else:
+                    action = self.select_action(state)
+                self.alpha = exploration_noise_start * (self.episodes - ep) / (self.episodes)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 # print(reward)
                 done = terminated or truncated
@@ -250,8 +282,9 @@ class SAC:
                 total_reward += reward
                 global_step+=1
 
-                if len(buffer) > self.batch_size: # start learning after the random episodes
-                    self.train(buffer)
+                if len(buffer) > 1000: # start learning after the random episodes
+                    for _ in range(1):
+                        self.train(buffer)
                 
                 if done:
                     break
