@@ -42,9 +42,9 @@ class ActorCritic(nn.Module):
 
 
 class PPOContinuousAgent:
-    def __init__(self, env_name="MountainCarContinuous-v0", hidden_size=64, learning_rate=1e-4, gamma=0.99,
-                 lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.5, train_iters=500,
-                 steps_per_iter=4096, mini_batch_size=256, ppo_epochs=5, eval_interval=10, save_interval=50,
+    def __init__(self, env_name="Pendulum-v1", hidden_size=64, learning_rate=1e-3, gamma=0.99,
+                 lam=0.9, clip_eps=0.2, value_coef=0.85, entropy_coef=0.01, train_iters=500,
+                 steps_per_iter=2048, mini_batch_size=64, ppo_epochs=10, eval_interval=10, save_interval=50,
                  random_seed=42):
 
         self.env_name = env_name
@@ -84,7 +84,7 @@ class PPOContinuousAgent:
         start_time = time.time()
 
         for i in range(self.train_iters):
-            if i > 20:
+            if i > 200:
                 self.entropy_coef = 0.0
                 self.lr = 1e-5
                 for param_group in self.optimizer.param_groups:

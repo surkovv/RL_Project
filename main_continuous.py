@@ -8,7 +8,7 @@ if __name__ == '__main__':
     all_eval_histories = []
     all_train_histories = []
     start_time = time.time()
-    name = 'MoutainCarContinuous-v0'
+    name = 'Pendulum-v1'
     best_means = []
     best_stds = []
 
