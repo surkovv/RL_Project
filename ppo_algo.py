@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from torch.distributions import Categorical
 from gym.wrappers import NormalizeObservation
 
-
 class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_size):
         super(ActorCritic, self).__init__()
@@ -28,9 +27,9 @@ class ActorCritic(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, env_name="MountainCar-v0", hidden_size=64, learning_rate=1e-3, gamma=0.99,
-                 lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.005, train_iters=500,
-                 steps_per_iter=4096, mini_batch_size=512, ppo_epochs=10, eval_interval=5):
+    def __init__(self, env_name="Acrobot-v1", hidden_size=64, learning_rate=1e-3, gamma=0.99,
+                 lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.01, train_iters=500,
+                 steps_per_iter=1024, mini_batch_size=128, ppo_epochs=10, eval_interval=5):
 
         self.env_name = env_name
         self.hidden_size = hidden_size
@@ -50,7 +49,7 @@ class PPOAgent:
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        env = gym.make(self.env_name)
+        env = NormalizeObservation(gym.make(self.env_name))
         env.seed(seed)
         obs_space = env.observation_space.shape[0]
         action_space = env.action_space.n
@@ -59,7 +58,9 @@ class PPOAgent:
         optimizer = optim.Adam(model.parameters(), lr=self.lr)
 
         score_history = []
-        eval_score_history = []
+        best_reward_mean = -np.inf
+        best_reward_std = 0.0
+        eval_score_history = {}
         global_step = 0
 
         for i in range(self.train_iters):
@@ -169,9 +170,33 @@ class PPOAgent:
                         total_reward += r
                     eval_rewards.append(total_reward)
                 avg_eval = float(np.mean(eval_rewards))
-                eval_score_history.append(avg_eval)
-                print(f"Seed {seed} | Iter {i+1}, Eval Avg Reward: {avg_eval:.2f}")
+                eval_score_history[global_step] = avg_eval 
+                print(f"Seed {seed} | Steps {global_step}, Eval Avg Reward: {avg_eval:.2f}")
 
+                if avg_eval >= best_reward_mean:
+                # Re-evaluate
+                    reevaluated = []
+                    for _ in range(20):
+                        s = env.reset()
+                        s = np.asarray(s, dtype=np.float32)
+                        done = False
+                        total_reward = 0.0
+                        while not done:
+                            s_tensor = torch.from_numpy(s).float().unsqueeze(0)
+                            with torch.no_grad():
+                                logits, _ = model(s_tensor)
+                                a = torch.argmax(torch.softmax(logits, dim=1), dim=1)
+                            s, r, done, _ = env.step(int(a.item()))
+                            s = np.asarray(s, dtype=np.float32)
+                            total_reward += r
+                        reevaluated.append(total_reward)
+
+                    mean = np.mean(reevaluated)
+                    std = np.std(reevaluated)
+
+                    if mean >= best_reward_mean:
+                        best_reward_mean = mean
+                        best_reward_std = std
         env.close()
-        return eval_score_history, score_history
+        return eval_score_history, score_history, best_reward_mean, best_reward_std
 
