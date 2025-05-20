@@ -20,7 +20,8 @@ class Actor(nn.Module):
             nn.Linear(state_dim, 256), nn.ReLU(),
             nn.Linear(256, 256), nn.ReLU())
         self.mean = nn.Linear(256,action_dim)
-        self.variance = nn.Linear(256,action_dim)
+        self.variance = nn.Sequential(nn.Linear(256,action_dim), nn.Sigmoid())
+        # self.log_variance = nn.Parameter(torch.ones(action_dim) * 0.2)
         self.max_action = max_actions
         self.reparam_noise = 1e-6
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -31,7 +32,8 @@ class Actor(nn.Module):
         latent = self.features(state)
         mean = self.mean(latent)
         variance = self.variance(latent)
-        variance = torch.clamp(variance, min=1e-6, max=1)
+        # variance = torch.exp(self.log_variance)
+        variance = torch.clamp(variance, min=0.1, max=1)
 
         return mean, variance 
     
@@ -185,14 +187,15 @@ class SAC:
         # actor_loss = F.mse_loss(log_probs, critic_min.view(-1))
         actor_loss = (self.alpha*log_probs - critic_min.view(-1)).mean()
 
+
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
         # --- Critic networks update ---
         q_hat = self.scale * reward + gamma * self.target_value(next_state).view(-1).detach()
+        
         q_hat = torch.where(done, reward, q_hat)  # no future reward if done
-
         q1_pred = self.critic1(state, action).view(-1)
         q2_pred = self.critic2(state, action).view(-1)
 
@@ -215,11 +218,12 @@ class SAC:
         self.env.reset(seed=seed)
 
         buffer = ReplayBuffer()
-        exploration_noise_start = 2
+        exploration_noise_start = self.alpha
 
         returns = {}
         eval_returns = {}
         episode_times = {}
+        global_step = 0
 
         action_dim = self.env.action_space.shape[0]
         max_action = float(self.env.action_space.high[0])
@@ -232,16 +236,21 @@ class SAC:
             total_reward = 0
             for n_step in range(self.num_steps):
                 action = self.select_action(state)
-                exploration_noise = exploration_noise_start * (self.episodes - ep) / self.episodes
-                # action = (action + np.random.normal(0, exploration_noise, size=action_dim)).clip(-max_action, max_action)
+                # self.alpha = exploration_noise_start * (self.episodes - ep) / (0.5*self.episodes)
+                # if ep >= 15:
+                    # action = (action + np.random.normal(0, self.alpha, size=action_dim)).clip(-max_action, max_action)
+                self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
+                # else:
+                #     action = np.random.normal(0, 0.5,size=action_dim)*max_action
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 # print(reward)
                 done = terminated or truncated
                 buffer.push(state, action, reward, next_state, done)
                 state = next_state
                 total_reward += reward
+                global_step+=1
 
-                if len(buffer) > self.batch_size:
+                if len(buffer) > self.batch_size: # start learning after the random episodes
                     self.train(buffer)
                 
                 if done:
@@ -250,8 +259,8 @@ class SAC:
             print(f"Episode {ep}, Return: {total_reward:.2f}, average time: {np.mean(np.array(list(episode_times.values()))):.2f}")
             step_counter += 1 
             end_time = time.time() - start_time
-            episode_times[step_counter] = end_time
-            returns[step_counter] = total_reward
+            episode_times[global_step] = end_time
+            returns[global_step] = total_reward
 
             n_eval = 5
 
@@ -269,7 +278,7 @@ class SAC:
                             break
                 total_reward = total_reward / n_eval
                 print(f"Episode {ep}, Eval return: {total_reward:.2f}")
-                eval_returns[step_counter] = total_reward
+                eval_returns[global_step] = total_reward
 
         # Plot
         plt.plot(returns.keys(), returns.values())
