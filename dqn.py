@@ -10,6 +10,7 @@ from time import time
 
 device = "cpu"
 
+
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim, num_layers):
         super(QNetwork, self).__init__()
@@ -26,25 +27,28 @@ class QNetwork(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-    
+
 
 class DQNAgent:
-    def __init__(self, env_name="CartPole-v1", 
-            hidden_dim=128, episodes=600, 
-            batch_size=64, num_steps=200, num_layers=2, 
-            learning_rate=1e-3, eval_interval=5, epsilon=1.0,
-            tau = 0.05, gamma = 0.99, epsilon_min=0.05, epsilon_decay=0.99):
+    def __init__(self, env_name="CartPole-v1",
+                 hidden_dim=128, episodes=600,
+                 batch_size=64, num_steps=200, num_layers=2,
+                 learning_rate=1e-3, eval_interval=5, epsilon=1.0,
+                 tau=0.05, gamma=0.99, epsilon_min=0.05, epsilon_decay=0.99,
+                 update_freq=1):
 
         self.env = gym.make(env_name)
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.n
-        
+
         self.episodes = episodes
         self.batch_size = batch_size
         self.num_steps = num_steps
 
-        self.q_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
-        self.target_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(device)
+        self.q_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(
+            device)
+        self.target_network = QNetwork(state_dim, action_dim, hidden_dim, num_layers).to(
+            device)
         self.target_network.load_state_dict(self.q_network.state_dict())
 
         self.best_reward_mean = -np.inf
@@ -60,6 +64,7 @@ class DQNAgent:
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.eval_interval = eval_interval
+        self.update_freq = update_freq
 
     def select_action(self, state, deterministic=False):
         if not deterministic and random.random() < self.epsilon:
@@ -88,13 +93,15 @@ class DQNAgent:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        
+
         if do_soft_update:
             self.soft_update()
 
     def soft_update(self):
-        for param, target_param in zip(self.q_network.parameters(), self.target_network.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for param, target_param in zip(self.q_network.parameters(),
+                                       self.target_network.parameters()):
+            target_param.data.copy_(
+                self.tau * param.data + (1 - self.tau) * target_param.data)
 
     def update_epsilon(self):
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
@@ -108,11 +115,13 @@ class DQNAgent:
         buffer = ReplayBuffer()
         rewards_history = {}
         eval_rewards_history = {}
-        episode_times = {}
+        # episode_times = {}
+
+        total_time = 0.0
 
         step_counter = 0
         for ep in range(self.episodes):
-            start_time = time()
+            # start_time = time()
             state, _ = self.env.reset()
             total_reward = 0
 
@@ -125,18 +134,18 @@ class DQNAgent:
                 total_reward += reward
                 step_counter += 1
                 if len(buffer) > self.batch_size:
-                    self.train(buffer, self.batch_size, step)
+                    up = not step % self.update_freq
+                    self.train(buffer, self.batch_size, up)
 
                 if done:
                     break
 
-
             self.update_epsilon()
             rewards_history[step_counter] = total_reward
-            time_elapsed = time() - start_time
-            episode_times[step_counter] = time_elapsed
+            # time_elapsed = time() - start_time
+            # total_time += time_elapsed
+            # episode_times[step_counter] = time_elapsed
             # print(f"Average time per episode: {np.mean(list(episode_times.values())):.3f}")
-
 
             if ep % self.eval_interval == self.eval_interval - 1:
                 eval_rewards = self.evaluate_policy(num_episodes=5)
@@ -158,7 +167,7 @@ class DQNAgent:
         # plt.title("DQN on CartPole-v1")
         # plt.grid()
         # plt.show()
-        return rewards_history, eval_rewards_history
+        return rewards_history, eval_rewards_history, total_time
 
     def evaluate_policy(self, num_episodes=20):
         rewards = []
