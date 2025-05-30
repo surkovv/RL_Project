@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from torch.distributions.normal import Normal
 import torch.nn.functional as F
 import time
-from utils import ReplayBuffer, OUNoise
+from utils import ReplayBuffer
 
 device = "cpu"
 
@@ -257,34 +257,17 @@ class SAC:
 
         action_dim = self.env.action_space.shape[0]
         max_action = float(self.env.action_space.high[0])
-        
-        noise = OUNoise(sigma=2, action_dim=action_dim)
-
+    
         step_counter = 0
         for ep in range(self.episodes):
             state, _ = self.env.reset()
-            noise.reset()
             start_time = time.time()
             total_reward = 0
             for n_step in range(self.num_steps):
-                
-                # if ep >= 15:
-                # action = (action + np.random.normal(0, 0.5, size=action_dim)).clip(-max_action, max_action)
                 self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
                 
-                # noise.sigma = 10 * (self.episodes - ep)/(3*(self.episodes))
                 action = self.select_action(state)
-                action =  (action + noise.sample()).clip(-max_action, max_action)
-                # else:
-                #     action = self.select_action(state)
-                # action = (action + np.random.normal(0, self.alpha, size=action_dim)).clip(-max_action, max_action)
-                # noise.sigma = self.alpha
-                # action = (action + noise.sample()).clip(-max_action, max_action)
-            
-                    
-                # self.alpha = exploration_noise_start * (self.episodes - ep) / (self.episodes)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
-                # print(reward)
                 done = terminated or truncated
                 buffer.push(state, action, reward, next_state, done)
                 state = next_state
@@ -332,43 +315,4 @@ class SAC:
         plt.show()
 
         return returns, eval_returns
-
-# def train_agent_sac(agent, env,env_name,episodes, batch_size, num_steps):
-#     buffer = ReplayBuffer()
-#     returns = []
-
-#     state_dim = env.observation_space.shape[0]
-#     action_dim = env.action_space.shape[0]
-#     max_action = float(env.action_space.high[0])
-
-#     exploration_noise_start = agent.exploration_noise
-
-#     for ep in range(episodes):
-#         state, _ = env.reset()
-#         total_reward = 0
-#         for n_step in range(num_steps):
-#             exploration_noise = exploration_noise_start * (1 - ep / episodes)
-#             action = agent.select_action(state)
-#             # noise = np.random.normal(0, exploration_noise, size=action_dim)
-#             # action = (action + noise).clip(-max_action, max_action)
-#             next_state, reward, terminated, truncated, _ = env.step(action)
-#             done = terminated or truncated
-#             buffer.push(state, action, reward, next_state, done)
-#             state = next_state
-#             total_reward += reward
-
-#             if len(buffer) > 1000:
-#                 agent.train(buffer, batch_size=batch_size)
-
-#         returns.append(total_reward)
-#         print(f"Episode {ep}, Return: {total_reward:.2f}")
-
-#     # Plot
-#     plt.plot(returns)
-#     plt.title("SAC Training on "+env_name)
-#     plt.xlabel("Episode")
-#     plt.ylabel("Total Reward")
-#     plt.grid()
-#     plt.show()
-
 
