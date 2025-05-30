@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from torch.distributions.normal import Normal
 import torch.nn.functional as F
 import time
-from utils import ReplayBuffer
+from utils import ReplayBuffer, OUNoise
 
 device = "cpu"
 
@@ -17,11 +17,11 @@ class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_actions = None):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Linear(state_dim, 64), nn.ReLU(),
-            nn.Linear(64, 64), nn.ReLU())
-        self.mean = nn.Linear(64,action_dim)
-        # self.variance = nn.Sequential(nn.Linear(64,action_dim), nn.Sigmoid())
-        self.variance = nn.Sequential(nn.Linear(64,action_dim))
+            nn.Linear(state_dim, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU())
+        self.mean = nn.Linear(256,action_dim)
+        # self.variance = nn.Sequential(nn.Linear(256,action_dim), nn.Sigmoid())
+        self.variance = nn.Sequential(nn.Linear(256,action_dim))
         # self.log_variance = nn.Parameter(torch.ones(action_dim) * 0.2)
         self.max_action = max_actions
         self.reparam_noise = 1e-6
@@ -40,7 +40,7 @@ class Actor(nn.Module):
     
     def sample_normal(self, state, reparametrize = True, greedy = False, alpha = None):
         mu, sigma = self.forward(state)
-        sigma = (1+alpha)*sigma 
+        # sigma = alpha 
         probabilities = Normal(mu, sigma)
 
         if greedy:
@@ -65,9 +65,9 @@ class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 64), nn.ReLU(),
-            nn.Linear(64, 64), nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(state_dim + action_dim, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 1)
         )
 
     def forward(self, state, action):
@@ -77,9 +77,9 @@ class Value(nn.Module):
     def __init__(self, state_dim):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(state_dim, 64), nn.ReLU(),
-            nn.Linear(64, 64), nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(state_dim, 256), nn.ReLU(),
+            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(256, 1)
         )
 
     def forward(self, state):
@@ -127,7 +127,7 @@ class SAC:
         self.autotune = use_autotune
 
         if self.autotune:
-            self.target_entropy = -0.3  # heuristic default
+            self.target_entropy = -0.23  # heuristic default
             self.log_alpha = torch.tensor(np.log(self.alpha), requires_grad=True, device=device)
             self.alpha_optimizer = optim.Adam([self.log_alpha], lr=3e-4)
         else:
@@ -257,23 +257,32 @@ class SAC:
 
         action_dim = self.env.action_space.shape[0]
         max_action = float(self.env.action_space.high[0])
-
+        
+        noise = OUNoise(sigma=2, action_dim=action_dim)
 
         step_counter = 0
         for ep in range(self.episodes):
             state, _ = self.env.reset()
+            noise.reset()
             start_time = time.time()
             total_reward = 0
             for n_step in range(self.num_steps):
                 
                 # if ep >= 15:
                 # action = (action + np.random.normal(0, 0.5, size=action_dim)).clip(-max_action, max_action)
-                # self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
-                if ep < 0:
-                    action = np.random.choice([-1, 1],size=action_dim)*max_action
-                else:
-                    action = self.select_action(state)
-                self.alpha = exploration_noise_start * (self.episodes - ep) / (self.episodes)
+                self.alpha = exploration_noise_start * (self.episodes - ep) / self.episodes
+                
+                # noise.sigma = 10 * (self.episodes - ep)/(3*(self.episodes))
+                action = self.select_action(state)
+                action =  (action + noise.sample()).clip(-max_action, max_action)
+                # else:
+                #     action = self.select_action(state)
+                # action = (action + np.random.normal(0, self.alpha, size=action_dim)).clip(-max_action, max_action)
+                # noise.sigma = self.alpha
+                # action = (action + noise.sample()).clip(-max_action, max_action)
+            
+                    
+                # self.alpha = exploration_noise_start * (self.episodes - ep) / (self.episodes)
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
                 # print(reward)
                 done = terminated or truncated
@@ -282,8 +291,8 @@ class SAC:
                 total_reward += reward
                 global_step+=1
 
-                if len(buffer) > 1000: # start learning after the random episodes
-                    for _ in range(1):
+                if len(buffer) > 128: # start learning after the random episodes, was 1000 for Pendulum-v1
+                    for _ in range(2):
                         self.train(buffer)
                 
                 if done:
