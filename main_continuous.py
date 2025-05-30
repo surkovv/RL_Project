@@ -20,7 +20,7 @@ if __name__ == '__main__':
         best_means.append(best_mean)
         best_stds.append(best_std)
 
-        np.save(f'ppo_eval_seed{seed}_{name}_ent_0pt005.npy', np.array(eval_scores))
+        np.save(f'ppo_eval_seed{seed}_{name}_step_4096.npy', np.array(eval_scores))
     print("Best mean reward: ", best_means)
     print("Best std reward: ", best_stds)
     total_time = time.time() - start_time

@@ -43,8 +43,8 @@ class ActorCritic(nn.Module):
 
 class PPOContinuousAgent:
     def __init__(self, env_name="Pendulum-v1", hidden_size=64, learning_rate=1e-3, gamma=0.99,
-                 lam=0.9, clip_eps=0.2, value_coef=0.85, entropy_coef=0.005, train_iters=500,
-                 steps_per_iter=2048, mini_batch_size=64, ppo_epochs=10, eval_interval=10, save_interval=50,
+                 lam=0.9, clip_eps=0.2, value_coef=0.85, entropy_coef=0.01, train_iters=500,
+                 steps_per_iter=4096, mini_batch_size=64, ppo_epochs=10, eval_interval=10, save_interval=50,
                  random_seed=42):
 
         self.env_name = env_name
