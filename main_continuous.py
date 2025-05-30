@@ -4,7 +4,7 @@ from ppo_algo_continuous import PPOContinuousAgent
 import time
 
 if __name__ == '__main__':
-    seeds = [42, 0, 345]
+    seeds = [0] #42,0,345
     all_eval_histories = []
     all_train_histories = []
     start_time = time.time()
@@ -20,7 +20,7 @@ if __name__ == '__main__':
         best_means.append(best_mean)
         best_stds.append(best_std)
 
-        np.save(f'ppo_eval_seed{seed}_{name}.npy', np.array(eval_scores))
+        np.save(f'ppo_eval_seed{seed}_{name}_ent_0pt005.npy', np.array(eval_scores))
     print("Best mean reward: ", best_means)
     print("Best std reward: ", best_stds)
     total_time = time.time() - start_time

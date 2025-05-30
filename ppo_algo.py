@@ -27,9 +27,9 @@ class ActorCritic(nn.Module):
 
 
 class PPOAgent:
-    def __init__(self, env_name="Acrobot-v1", hidden_size=64, learning_rate=1e-3, gamma=0.99,
+    def __init__(self, env_name="CartPole-v1", hidden_size=64, learning_rate=3e-4, gamma=0.99,
                  lam=0.95, clip_eps=0.2, value_coef=0.5, entropy_coef=0.01, train_iters=500,
-                 steps_per_iter=1024, mini_batch_size=128, ppo_epochs=10, eval_interval=5):
+                 steps_per_iter=1024, mini_batch_size=512, ppo_epochs=10, eval_interval=5):
 
         self.env_name = env_name
         self.hidden_size = hidden_size
