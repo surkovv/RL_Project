@@ -16,7 +16,8 @@ pip install gym numpy matplotlib torch gymnasium
 
 
 ### Running the Code
-## PPO Algortithm
+## PPO Algorithm
+### Discrete
 ```bash
 python main.py
 ```
