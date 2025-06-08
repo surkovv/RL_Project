@@ -97,6 +97,8 @@ returns, eval_rewards = agent.train_with_seed(seed = 48)
 python td3.py
 ```
 
+Finally, note that SAC, TD3, and PPO continuous can only work on continuous environments: Pendulum-v1, MountainCarContinuous-v0.
 
+On the other hand, DQN and PPO discrete can only work on discrete environments: CartPole-v1, Acrobot-v1, MountainCar-v0
 
   
